@@ -20,8 +20,15 @@ def run_watcher():
     target_dates = cfg["target_dates"]
     interval = cfg["check_interval_sec"]
     button_text = cfg["button_text"]
+    stop_after_detection = cfg.get("stop_after_detection", False)
+
+    # 既通知をランタイムで管理（再通知防止）
+    notified = set()
+    # 各日付の最後に検知したボタンラベルを記録
+    last_button_labels = {}
 
     print("監視対象日時:", target_dates)
+    print("検知後の動作:", "終了" if stop_after_detection else "継続監視")
     with sync_playwright() as p:
         browser = p.chromium.launch_persistent_context(
             user_data_dir=user_data_dir,
@@ -68,6 +75,26 @@ def run_watcher():
                                 label = btn.inner_text().strip()
                             print("ボタンラベル:", label)
                             if button_text in label:
+                                # 前回のボタンラベルをチェック
+                                last_label = last_button_labels.get(td)
+
+                                # ボタンラベルが変わったかどうかをチェック
+                                label_changed = (last_label is not None and last_label != label)
+
+                                # 重複通知防止キー（日付とボタンラベルの組み合わせで管理）
+                                key = f"{td}||{label}"
+
+                                if key in notified and not label_changed:
+                                    print("既に通知済み（スキップ）:", key)
+                                    continue
+
+                                # ラベルが変わった場合は通知済みキーから削除して再通知
+                                if label_changed:
+                                    print(f"ボタンラベルが変更されました: '{last_label}' → '{label}'")
+                                    # 古いキーを削除
+                                    old_key = f"{td}||{last_label}"
+                                    notified.discard(old_key)
+
                                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 message = f"チケット販売を検知しました！\n日付: {td}\n時刻: {now}\nボタン: {label}\n{url}"
                                 # 通知
@@ -79,16 +106,25 @@ def run_watcher():
                                     print("自動クリック実行")
                                 except Exception as e:
                                     print("クリック失敗:", e)
+
+                                notified.add(key)
+                                last_button_labels[td] = label
                                 found_any = True
-                                break
+                                print(f"通知完了。キー '{key}' を記録しました。")
                             else:
                                 print("ボタンはあるが条件に合致しない:", label)
-                    if found_any:
-                        break
+                                # 条件に合致しないボタンも記録しておく（ラベル変更検知のため）
+                                last_button_labels[td] = label
 
                 if found_any:
-                    print("検知処理済み、終了します。")
-                    break
+                    print("検知処理済み。")
+                    if stop_after_detection:
+                        print("stop_after_detection=true のため終了します。")
+                        break
+                    else:
+                        print("継続監視します。次ループまで待機します。")
+                        time.sleep(interval)
+                        continue
 
                 print(f"{datetime.now():%H:%M:%S} - 未検出。{interval}s後再試行。")
                 time.sleep(interval)
