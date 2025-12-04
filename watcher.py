@@ -21,6 +21,7 @@ def run_watcher():
     interval = cfg["check_interval_sec"]
     button_text = cfg["button_text"]
     stop_after_detection = cfg.get("stop_after_detection", False)
+    headless = cfg.get("headless", False)
 
     # 既通知をランタイムで管理（再通知防止）
     notified = set()
@@ -29,12 +30,14 @@ def run_watcher():
 
     print("監視対象日時:", target_dates)
     print("検知後の動作:", "終了" if stop_after_detection else "継続監視")
+    print("ブラウザモード:", "Headless（バックグラウンド）" if headless else "表示")
     with sync_playwright() as p:
+        browser_args = ["--start-maximized"] if not headless else []
         browser = p.chromium.launch_persistent_context(
             user_data_dir=user_data_dir,
             executable_path=chrome_path,
-            headless=False,
-            args=["--start-maximized"]
+            headless=headless,
+            args=browser_args
         )
         page = browser.new_page()
         page.goto(url, wait_until="networkidle")
