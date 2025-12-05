@@ -25,8 +25,15 @@ def check_target(page, target_config, cfg, notified):
     found_any = False
 
     try:
-        # ページリロード（既に開いているページ）
-        page.reload(wait_until="networkidle", timeout=30000)
+        # 現在のURLをチェック
+        current_url = page.url
+        if current_url != url and not current_url.startswith(url):
+            print(f"[{target_name}] URLが変更されています: {current_url} → {url}")
+            print(f"[{target_name}] 元のURLに戻ります...")
+            page.goto(url, wait_until="networkidle", timeout=30000)
+        else:
+            # ページリロード（既に開いているページ）
+            page.reload(wait_until="networkidle", timeout=30000)
 
         # セレクタが指定されている場合は待機、なければキーワードで検索
         items = []
