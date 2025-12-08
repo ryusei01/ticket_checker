@@ -20,20 +20,13 @@ def check_target(page, target_config, cfg, notified):
     selector = target_config.get("selector", "")
     target_dates = target_config["target_dates"]
     detect_text = target_config.get("detect_text", "")
-    button_selector = target_config.get("button_selector", "")
+    # button_selector = target_config.get("button_selector", "")
 
     found_any = False
 
     try:
-        # 現在のURLをチェック
-        current_url = page.url
-        if current_url != url and not current_url.startswith(url):
-            print(f"[{target_name}] URLが変更されています: {current_url} → {url}")
-            print(f"[{target_name}] 元のURLに戻ります...")
-            page.goto(url, wait_until="networkidle", timeout=30000)
-        else:
-            # ページリロード（既に開いているページ）
-            page.reload(wait_until="networkidle", timeout=30000)
+        # 毎回URLに直接アクセス（リロードより確実）
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
         # セレクタが指定されている場合は待機、なければキーワードで検索
         items = []
@@ -77,19 +70,11 @@ def check_target(page, target_config, cfg, notified):
                 text = item.evaluate("el => el.innerText || ''", timeout=3000)
                 text = normalize(text)
 
-                print(f"[{target_name}] [{idx+1}/{len(items)}] テキスト取得: {len(text)}文字")
-                # デバッグ: テキストの一部を表示
-                preview = text[:100].replace('\n', ' ')
-                print(f"[{target_name}] [{idx+1}/{len(items)}] プレビュー: {preview}...")
-
                 # 部分一致で各ターゲット日付をチェック
                 # スペースを正規化して比較
                 normalized_text = ' '.join(text.split())
                 for td in target_dates:
                     normalized_td = ' '.join(td.split())
-
-                    # デバッグ: 比較内容を出力
-                    print(f"[{target_name}] [{idx+1}/{len(items)}] 比較: '{normalized_td[:50]}...' in '{normalized_text[:100]}...'")
 
                     if normalized_td in normalized_text:
                         print(f"[{target_name}] 対象枠検出: {td}")
@@ -121,19 +106,6 @@ def check_target(page, target_config, cfg, notified):
                         # 通知
                         send_line_push(cfg["line_channel_access_token"], cfg["line_user_id"], message)
                         send_mail_ipv4(cfg, f"チケット販売検知 [{target_name}]", message)
-
-                        # ボタンをクリック（設定されている場合）
-                        if button_selector:
-                            button_locator = item.locator(button_selector)
-                            if button_locator.count() > 0:
-                                try:
-                                    btn = button_locator.first
-                                    btn.click()
-                                    print(f"[{target_name}] 自動クリック実行")
-                                except Exception as e:
-                                    print(f"[{target_name}] クリック失敗:", e)
-                            else:
-                                print(f"[{target_name}] クリック対象ボタンが見つかりません")
 
                         notified.add(notify_key)
                         found_any = True
