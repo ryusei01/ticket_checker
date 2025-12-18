@@ -56,7 +56,7 @@ class LinePushAPI:
             Exception: APIリクエストが失敗した場合
         """
         try:
-            response = requests.post(url, headers=self.headers, json=payload, timeout=10)
+            response = requests.post(url, headers=self.headers, json=payload, timeout=1)
             response.raise_for_status()
             return response.json() if response.content else {}
         except requests.exceptions.HTTPError as e:
@@ -419,10 +419,10 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用例:
-  python line_push_api.py "こんにちは！"
+  python line_push_api.py "こんにちは！"                    # config.jsonの設定に従う
   python line_push_api.py "チケット販売を検知しました" --silent
   python line_push_api.py メッセージ --no-notification
-  python line_push_api.py "全員に送信" --broadcast
+  python line_push_api.py "全員に送信" --broadcast         # ブロードキャスト送信（設定を上書き）
         """
     )
     parser.add_argument("message", nargs="*", help="送信するメッセージ")
@@ -455,21 +455,50 @@ if __name__ == "__main__":
             # メッセージを送信
             api = LinePushAPI(token)
             
+            # サイレント通知の設定（オプション > config.json の順で優先）
+            if args.notification_disabled:
+                notification_disabled = True
+            else:
+                # config.jsonの設定を確認
+                notification_disabled = config.get("notification_disabled", False) or config.get("silent", False)
+            
+            mode = "（サイレント）" if notification_disabled else ""
+            
             if args.broadcast:
                 # ブロードキャスト送信（友達追加した全員に送信）
-                api.send_broadcast_text(message, notification_disabled=args.notification_disabled)
-                mode = "（サイレント）" if args.notification_disabled else ""
+                api.send_broadcast_text(message, notification_disabled=notification_disabled)
                 print(f"✓ ブロードキャストメッセージを送信しました{mode}（友達追加した全員に送信）: {message}")
             else:
-                # 通常のプッシュ送信（特定ユーザーに送信）
-                user_id = config.get("line_user_id")
-                if not user_id:
-                    print("エラー: ブロードキャスト送信を使用する場合は --broadcast オプションを指定してください")
-                    print("または config.json に line_user_id を設定してください")
-                    sys.exit(1)
-                api.send_text(user_id, message, notification_disabled=args.notification_disabled)
-                mode = "（サイレント）" if args.notification_disabled else ""
-                print(f"✓ メッセージを送信しました{mode}: {message}")
+                # オプションが指定されない場合: config.jsonの設定に従う
+                use_broadcast = config.get("use_broadcast", False)
+                
+                if use_broadcast:
+                    # config.jsonでブロードキャストが有効な場合
+                    api.send_broadcast_text(message, notification_disabled=notification_disabled)
+                    print(f"✓ ブロードキャストメッセージを送信しました{mode}（config.jsonの設定に従い、友達追加した全員に送信）: {message}")
+                else:
+                    # 従来の方法：ユーザーIDリストを使用
+                    user_ids = []
+                    # line_user_ids（配列）が設定されている場合はそれを使用
+                    if "line_user_ids" in config and isinstance(config["line_user_ids"], list):
+                        user_ids = config["line_user_ids"]
+                    # line_user_id（単一）が設定されている場合はそれも追加
+                    if "line_user_id" in config and config["line_user_id"]:
+                        if config["line_user_id"] not in user_ids:
+                            user_ids.append(config["line_user_id"])
+                    
+                    if user_ids:
+                        # 複数ユーザーに送信
+                        for user_id in user_ids:
+                            api.send_text(user_id, message, notification_disabled=notification_disabled)
+                        print(f"✓ メッセージを送信しました{mode}（{len(user_ids)}人）: {message}")
+                    else:
+                        print("エラー: 送信先ユーザーIDが設定されていません")
+                        print("以下のいずれかを設定してください:")
+                        print("  - config.json に use_broadcast: true を設定")
+                        print("  - config.json に line_user_id または line_user_ids を設定")
+                        print("  - --broadcast オプションを指定")
+                        sys.exit(1)
         except FileNotFoundError:
             print("エラー: config.json が見つかりません")
             sys.exit(1)
@@ -492,14 +521,30 @@ if __name__ == "__main__":
                 config = json.load(f)
             
             token = config["line_channel_access_token"]
-            user_id = config["line_user_id"]
             
             # APIクライアントの作成
             api = LinePushAPI(token)
             
-            # テストメッセージ
+            # テストメッセージ（config.jsonの設定に従う）
             print("テストメッセージを送信...")
-            api.send_text(user_id, "これはテストメッセージです。")
-            print("✓ 送信完了")
+            use_broadcast = config.get("use_broadcast", False)
+            
+            if use_broadcast:
+                api.send_broadcast_text("これはテストメッセージです。")
+                print("✓ ブロードキャスト送信完了（友達追加した全員に送信）")
+            else:
+                user_ids = []
+                if "line_user_ids" in config and isinstance(config["line_user_ids"], list):
+                    user_ids = config["line_user_ids"]
+                if "line_user_id" in config and config["line_user_id"]:
+                    if config["line_user_id"] not in user_ids:
+                        user_ids.append(config["line_user_id"])
+                
+                if user_ids:
+                    for user_id in user_ids:
+                        api.send_text(user_id, "これはテストメッセージです。")
+                    print(f"✓ 送信完了（{len(user_ids)}人）")
+                else:
+                    print("エラー: 送信先ユーザーIDが設定されていません")
         except Exception as e:
             print(f"エラー: {e}")

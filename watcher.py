@@ -4,7 +4,7 @@ import time
 import argparse
 from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-from notifier import send_line_push, send_line_push_to_all, send_line_broadcast, send_mail_ipv4
+from notifier import send_notifications_async
 
 def load_config():
     with open("config.json", "r", encoding="utf-8") as f:
@@ -104,36 +104,17 @@ def check_target(page, target_config, cfg, notified, notification_config=None):
                         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         message = f"[{target_name}] チケット販売を検知しました！\n日付: {td}\n時刻: {now}\n検知文言: {detect_text}\n{url}"
 
-                        # 通知（コマンドラインオプション > config.json の順で優先）
+                        # 通知（非同期で送信 - メインスレッドをブロックしない）
+                        use_broadcast = False
                         if notification_config:
                             # コマンドラインオプションで指定された場合
-                            if notification_config.get("broadcast", False):
-                                send_line_broadcast(cfg["line_channel_access_token"], message)
-                            elif notification_config.get("user_ids"):
-                                send_line_push_to_all(cfg["line_channel_access_token"], notification_config["user_ids"], message)
-                            else:
-                                print("警告: 通知先が指定されていません")
+                            use_broadcast = notification_config.get("broadcast", False)
                         else:
                             # config.jsonの設定に従う
-                            if cfg.get("use_broadcast", False):
-                                send_line_broadcast(cfg["line_channel_access_token"], message)
-                            else:
-                                # 従来の方法：ユーザーIDリストを使用
-                                user_ids = []
-                                # line_user_ids（配列）が設定されている場合はそれを使用
-                                if "line_user_ids" in cfg and isinstance(cfg["line_user_ids"], list):
-                                    user_ids = cfg["line_user_ids"]
-                                # line_user_id（単一）が設定されている場合はそれも追加
-                                if "line_user_id" in cfg and cfg["line_user_id"]:
-                                    if cfg["line_user_id"] not in user_ids:
-                                        user_ids.append(cfg["line_user_id"])
-                                
-                                if user_ids:
-                                    send_line_push_to_all(cfg["line_channel_access_token"], user_ids, message)
-                                else:
-                                    print("警告: 送信先ユーザーIDが設定されていません")
+                            use_broadcast = cfg.get("use_broadcast", False)
                         
-                        send_mail_ipv4(cfg, f"チケット販売検知 [{target_name}]", message)
+                        # 非同期で通知送信（LINEとメールを並列実行、メインスレッドはブロックされない）
+                        send_notifications_async(cfg, message, target_name, use_broadcast=use_broadcast)
 
                         notified.add(notify_key)
                         found_any = True
