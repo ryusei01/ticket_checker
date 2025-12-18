@@ -342,6 +342,47 @@ class LinePushAPI:
         """
         messages = [self.create_text_message(text) for text in texts[:5]]  # 最大5個
         return self.push_message(user_id, messages, notification_disabled)
+    
+    def broadcast_message(
+        self,
+        messages: List[Dict],
+        notification_disabled: bool = False
+    ) -> Dict:
+        """
+        ブロードキャストメッセージを送信（友達追加した全員に送信）
+        
+        Args:
+            messages: メッセージオブジェクトのリスト
+            notification_disabled: 通知を無効にするかどうか
+            
+        Returns:
+            APIレスポンス
+        """
+        url = f"{self.BASE_URL}/message/broadcast"
+        payload = {
+            "messages": messages,
+            "notificationDisabled": notification_disabled
+        }
+        return self._send_request(url, payload)
+    
+    def send_broadcast_text(
+        self,
+        text: str,
+        notification_disabled: bool = False
+    ) -> Dict:
+        """
+        ブロードキャストテキストメッセージを送信（簡易メソッド）
+        友達追加した全員に自動送信（ユーザーID管理不要）
+        
+        Args:
+            text: メッセージテキスト
+            notification_disabled: 通知を無効にするかどうか
+            
+        Returns:
+            APIレスポンス
+        """
+        message = self.create_text_message(text)
+        return self.broadcast_message([message], notification_disabled)
 
 
 # 便利関数（既存コードとの互換性のため）
@@ -381,6 +422,7 @@ if __name__ == "__main__":
   python line_push_api.py "こんにちは！"
   python line_push_api.py "チケット販売を検知しました" --silent
   python line_push_api.py メッセージ --no-notification
+  python line_push_api.py "全員に送信" --broadcast
         """
     )
     parser.add_argument("message", nargs="*", help="送信するメッセージ")
@@ -390,6 +432,11 @@ if __name__ == "__main__":
         action="store_true",
         dest="notification_disabled",
         help="通知音を鳴らさずに送信（サイレント通知）"
+    )
+    parser.add_argument(
+        "--broadcast",
+        action="store_true",
+        help="ブロードキャスト送信（友達追加した全員に送信、ユーザーID管理不要）"
     )
     
     args = parser.parse_args()
@@ -404,14 +451,25 @@ if __name__ == "__main__":
                 config = json.load(f)
             
             token = config["line_channel_access_token"]
-            user_id = config["line_user_id"]
             
             # メッセージを送信
             api = LinePushAPI(token)
-            api.send_text(user_id, message, notification_disabled=args.notification_disabled)
             
-            mode = "（サイレント）" if args.notification_disabled else ""
-            print(f"✓ メッセージを送信しました{mode}: {message}")
+            if args.broadcast:
+                # ブロードキャスト送信（友達追加した全員に送信）
+                api.send_broadcast_text(message, notification_disabled=args.notification_disabled)
+                mode = "（サイレント）" if args.notification_disabled else ""
+                print(f"✓ ブロードキャストメッセージを送信しました{mode}（友達追加した全員に送信）: {message}")
+            else:
+                # 通常のプッシュ送信（特定ユーザーに送信）
+                user_id = config.get("line_user_id")
+                if not user_id:
+                    print("エラー: ブロードキャスト送信を使用する場合は --broadcast オプションを指定してください")
+                    print("または config.json に line_user_id を設定してください")
+                    sys.exit(1)
+                api.send_text(user_id, message, notification_disabled=args.notification_disabled)
+                mode = "（サイレント）" if args.notification_disabled else ""
+                print(f"✓ メッセージを送信しました{mode}: {message}")
         except FileNotFoundError:
             print("エラー: config.json が見つかりません")
             sys.exit(1)

@@ -1,9 +1,10 @@
 # watcher.py
 import json
 import time
+import argparse
 from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-from notifier import send_line_push, send_mail_ipv4
+from notifier import send_line_push, send_line_push_to_all, send_line_broadcast, send_mail_ipv4
 
 def load_config():
     with open("config.json", "r", encoding="utf-8") as f:
@@ -13,7 +14,7 @@ def normalize(s):
     # 改行・タブを削除（スペースに変換しない）
     return s.replace("\n", "").replace("\r", "").replace("\t", "").strip()
 
-def check_target(page, target_config, cfg, notified):
+def check_target(page, target_config, cfg, notified, notification_config=None):
     """単一ターゲットの監視処理"""
     target_name = target_config["name"]
     url = target_config["url"]
@@ -103,8 +104,35 @@ def check_target(page, target_config, cfg, notified):
                         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         message = f"[{target_name}] チケット販売を検知しました！\n日付: {td}\n時刻: {now}\n検知文言: {detect_text}\n{url}"
 
-                        # 通知
-                        send_line_push(cfg["line_channel_access_token"], cfg["line_user_id"], message)
+                        # 通知（コマンドラインオプション > config.json の順で優先）
+                        if notification_config:
+                            # コマンドラインオプションで指定された場合
+                            if notification_config.get("broadcast", False):
+                                send_line_broadcast(cfg["line_channel_access_token"], message)
+                            elif notification_config.get("user_ids"):
+                                send_line_push_to_all(cfg["line_channel_access_token"], notification_config["user_ids"], message)
+                            else:
+                                print("警告: 通知先が指定されていません")
+                        else:
+                            # config.jsonの設定に従う
+                            if cfg.get("use_broadcast", False):
+                                send_line_broadcast(cfg["line_channel_access_token"], message)
+                            else:
+                                # 従来の方法：ユーザーIDリストを使用
+                                user_ids = []
+                                # line_user_ids（配列）が設定されている場合はそれを使用
+                                if "line_user_ids" in cfg and isinstance(cfg["line_user_ids"], list):
+                                    user_ids = cfg["line_user_ids"]
+                                # line_user_id（単一）が設定されている場合はそれも追加
+                                if "line_user_id" in cfg and cfg["line_user_id"]:
+                                    if cfg["line_user_id"] not in user_ids:
+                                        user_ids.append(cfg["line_user_id"])
+                                
+                                if user_ids:
+                                    send_line_push_to_all(cfg["line_channel_access_token"], user_ids, message)
+                                else:
+                                    print("警告: 送信先ユーザーIDが設定されていません")
+                        
                         send_mail_ipv4(cfg, f"チケット販売検知 [{target_name}]", message)
 
                         notified.add(notify_key)
@@ -121,7 +149,7 @@ def check_target(page, target_config, cfg, notified):
 
     return found_any
 
-def run_watcher():
+def run_watcher(notification_config=None):
     cfg = load_config()
     chrome_path = cfg["chrome_path"]
     user_data_dir = f'{cfg["user_data_dir"]}\\{cfg["profile"]}'
@@ -173,7 +201,7 @@ def run_watcher():
                 # 各ターゲットを並行チェック（それぞれ専用のタブで）
                 for idx, target in enumerate(watch_targets):
                     page = pages[idx]
-                    result = check_target(page, target, cfg, notified)
+                    result = check_target(page, target, cfg, notified, notification_config)
                     found_any = found_any or result
 
                 if found_any:
@@ -196,4 +224,44 @@ def run_watcher():
         browser.close()
 
 if __name__ == "__main__":
-    run_watcher()
+    parser = argparse.ArgumentParser(
+        description="チケット監視スクリプト",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+使用例:
+  python watcher.py                           # config.jsonの設定に従う
+  python watcher.py --broadcast               # 友達追加した全員に送信
+  python watcher.py --user Uxxx               # 特定ユーザーに送信
+  python watcher.py --user Uxxx --user Uyyy   # 複数ユーザーに送信
+        """
+    )
+    parser.add_argument(
+        "--broadcast",
+        action="store_true",
+        help="ブロードキャスト送信（友達追加した全員に送信、ユーザーID管理不要）"
+    )
+    parser.add_argument(
+        "--user",
+        action="append",
+        dest="user_ids",
+        help="送信先ユーザーIDを指定（複数指定可能）"
+    )
+    
+    args = parser.parse_args()
+    
+    # 通知設定を構築
+    notification_config = None
+    if args.broadcast:
+        notification_config = {"broadcast": True}
+        print("通知設定: ブロードキャスト送信（友達追加した全員に送信）")
+    elif args.user_ids:
+        notification_config = {"user_ids": args.user_ids}
+        print(f"通知設定: 指定ユーザーに送信 ({len(args.user_ids)}人)")
+        for user_id in args.user_ids:
+            print(f"  - {user_id}")
+    else:
+        print("通知設定: config.jsonの設定に従います")
+    
+    print()
+    
+    run_watcher(notification_config)
