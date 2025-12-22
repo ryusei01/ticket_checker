@@ -27,6 +27,7 @@ class LinePushAPI:
     """LINE Push API クライアントクラス"""
     
     BASE_URL = "https://api.line.me/v2/bot"
+    REQUEST_TIMEOUT_SEC = 0.3
     
     def __init__(self, channel_access_token: str):
         """
@@ -56,7 +57,12 @@ class LinePushAPI:
             Exception: APIリクエストが失敗した場合
         """
         try:
-            response = requests.post(url, headers=self.headers, json=payload, timeout=1)
+            response = requests.post(
+                url,
+                headers=self.headers,
+                json=payload,
+                timeout=self.REQUEST_TIMEOUT_SEC,
+            )
             response.raise_for_status()
             return response.json() if response.content else {}
         except requests.exceptions.HTTPError as e:

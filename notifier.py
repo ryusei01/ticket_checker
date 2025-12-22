@@ -6,6 +6,11 @@ from email.utils import formatdate
 import requests
 import threading
 
+# タイムアウト（秒）
+# ※ 短くしすぎると失敗率が上がります
+LINE_HTTP_TIMEOUT_SEC = 0.3
+SMTP_TIMEOUT_SEC = 1.0
+
 def send_line_push(token, user_id, message, notification_disabled=False):
     """
     単一ユーザーにLINEプッシュメッセージを送信
@@ -24,7 +29,7 @@ def send_line_push(token, user_id, message, notification_disabled=False):
         "notificationDisabled": notification_disabled
     }
     try:
-        r = requests.post(url, headers=headers, json=payload, timeout=1)
+        r = requests.post(url, headers=headers, json=payload, timeout=LINE_HTTP_TIMEOUT_SEC)
         if r.status_code == 200:
             mode = "（サイレント）" if notification_disabled else ""
             print(f"LINE通知送信成功{mode} (ユーザーID: {user_id})")
@@ -78,7 +83,7 @@ def send_line_broadcast(token, message, notification_disabled=False):
         "notificationDisabled": notification_disabled
     }
     try:
-        r = requests.post(url, headers=headers, json=payload, timeout=1)
+        r = requests.post(url, headers=headers, json=payload, timeout=LINE_HTTP_TIMEOUT_SEC)
         if r.status_code == 200:
             mode = "（サイレント）" if notification_disabled else ""
             print(f"LINEブロードキャスト送信成功{mode}（友達追加した全員に送信）")
@@ -97,7 +102,12 @@ def send_mail_ipv4(cfg, subject, body):
     try:
         addrinfo = socket.getaddrinfo(cfg["smtp_host"], cfg["smtp_port"], socket.AF_INET, socket.SOCK_STREAM)
         ipv4_addr = addrinfo[0][4][0]
-        with smtplib.SMTP_SSL(ipv4_addr, cfg["smtp_port"], local_hostname='localhost') as s:
+        with smtplib.SMTP_SSL(
+            ipv4_addr,
+            cfg["smtp_port"],
+            local_hostname="localhost",
+            timeout=SMTP_TIMEOUT_SEC,
+        ) as s:
             s.set_debuglevel(0)
             s.login(cfg["smtp_user"], cfg["smtp_password"])
             s.send_message(msg)
